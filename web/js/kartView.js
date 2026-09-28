@@ -2,6 +2,7 @@
 // draws the latest state and eases toward it between frames.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { instance } from './models.js';
 
 // Server coordinates are (x, y) on the ground with heading counter-clockwise
 // from +x. In Three.js y is up, so world (x, y) -> (x, 0, -y) and a model
@@ -202,6 +203,9 @@ export class KartView {
     this.sugarGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
     this.sugarMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xbfd9ff, emissiveIntensity: 0.6, roughness: 0.7 });
 
+    this.obstacleModel = null;
+    this.sugarModel = null;
+    this.mixers = [];
     this.state = null;
     this.disp = { x: 0, y: 0, h: 0, z: 0 };
     this.lead = { x: 0, y: 0, h: 0 };
@@ -298,36 +302,76 @@ export class KartView {
     }
   }
 
+  // Swap in artist models from web/assets/models/models.json (see models.js).
+  // Returns the credit lines to show.
+  applyModels(models) {
+    const credits = [];
+    const adopt = (group, entry) => {
+      for (const c of group.children) c.visible = false;
+      const m = instance(entry);
+      group.add(m);
+      if (m.userData.mixer) this.mixers.push(m.userData.mixer);
+    };
+    for (const entry of models) {
+      if (entry.role === 'kart') adopt(this.kart, entry);
+      else if (entry.role === 'truck') adopt(this.truck, entry);
+      else if (entry.role === 'obstacle') this.obstacleModel = entry;
+      else if (entry.role === 'sugar') this.sugarModel = entry;
+      else if (entry.role === 'scenery') {
+        for (const [x, y, heading = 0] of entry.place || [[0, 0, 0]]) {
+          const m = instance(entry);
+          m.position.copy(toVec(x, y));
+          m.rotation.y = heading * (Math.PI / 180);
+          this.scene.add(m);
+          if (m.userData.mixer) this.mixers.push(m.userData.mixer);
+        }
+      }
+      if (entry.credit && !credits.includes(entry.credit)) credits.push(entry.credit);
+    }
+    // Rebuild obstacles / sugar on the next update so they use the new models.
+    for (const e of this.obstacles.values()) this.scene.remove(e.group);
+    for (const e of this.sugars.values()) this.scene.remove(e);
+    this.obstacles.clear();
+    this.sugars.clear();
+    return credits;
+  }
+
   update(state) {
     this.state = state;
     // Obstacles
     for (const o of state.obstacles) {
       let e = this.obstacles.get(o.id);
       if (!e) {
-        e = makeSwatter();
+        e = this.obstacleModel ? { group: instance(this.obstacleModel), headMat: null } : makeSwatter();
+        if (e.group.userData.mixer) this.mixers.push(e.group.userData.mixer);
         this.scene.add(e.group);
         this.obstacles.set(o.id, e);
       }
       e.group.position.copy(toVec(o.x, o.y));
       e.group.visible = !o.ok;
       e.group.rotation.z = o.hit ? -1.3 : 0;
-      e.headMat.color.set(o.hit ? 0x772233 : 0xff3355);
+      if (e.headMat) e.headMat.color.set(o.hit ? 0x772233 : 0xff3355);
     }
     for (const s of state.sugars) {
       let e = this.sugars.get(s.id);
       if (!e) {
-        e = new THREE.Mesh(this.sugarGeo, this.sugarMat);
-        e.castShadow = true;
+        if (this.sugarModel) {
+          e = instance(this.sugarModel);
+        } else {
+          e = new THREE.Mesh(this.sugarGeo, this.sugarMat);
+          e.castShadow = true;
+        }
         this.scene.add(e);
         this.sugars.set(s.id, e);
       }
-      e.position.copy(toVec(s.x, s.y, 0.9));
+      e.position.copy(toVec(s.x, s.y, this.sugarModel ? 0 : 0.9));
       e.visible = s.on;
     }
     this.truck.visible = !!state.lead;
   }
 
   render(dt, now) {
+    for (const m of this.mixers) m.update(dt);
     const s = this.state;
     if (s) {
       const k = s.kart;
@@ -359,7 +403,10 @@ export class KartView {
         this.truck.position.copy(toVec(this.lead.x, this.lead.y));
         this.truck.rotation.y = this.lead.h;
       }
-      for (const e of this.sugars.values()) e.rotation.set(now * 0.7, now * 1.1, 0);
+      for (const e of this.sugars.values()) {
+        if (this.sugarModel) e.rotation.y = now * 1.1;
+        else e.rotation.set(now * 0.7, now * 1.1, 0);
+      }
 
       // Keep the shadow camera on the kart.
       this.sun.position.set(this.kart.position.x + 40, 70, this.kart.position.z + 25);

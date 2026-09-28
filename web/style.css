@@ -134,6 +134,12 @@ select { background: #0f1526; border: 1px solid rgba(124, 243, 255, 0.2); border
   white-space: nowrap;
 }
 .flash.show { opacity: 1; transition: none; }
+.credits {
+  position: absolute; left: 14px; bottom: 58px; max-width: 60%;
+  font-size: 11px; color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+.credits:empty { display: none; }
 .cam-buttons { position: absolute; right: 10px; bottom: 10px; z-index: 3; display: flex; gap: 4px; }
 .cam-buttons button { padding: 3px 8px; font-size: 11px; background: rgba(5, 7, 13, 0.55); }
 .cam-buttons button.on { color: var(--accent); border-color: var(--accent); }

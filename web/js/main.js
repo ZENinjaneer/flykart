@@ -1,6 +1,7 @@
 import { BrainView } from './brainView.js';
 import { KartView } from './kartView.js';
 import { EyePanel, MotorPanel, RasterPanel, PerfPanel } from './dashboard.js';
+import { loadModels } from './models.js';
 
 const $ = (id) => document.getElementById(id);
 const decoder = new TextDecoder();
@@ -74,6 +75,11 @@ function onInit(msg) {
   init = msg;
   if (first) {
     kart = new KartView($('kart-canvas'), $('kart-canvas').parentElement, msg.world);
+    loadModels().then((models) => {
+      if (!models.length) return;
+      const credits = kart.applyModels(models);
+      if (credits.length) $('kart-credits').textContent = `3D art: ${credits.join(' · ')}`;
+    });
     eyePanel = new EyePanel($('eye-canvas'), msg.world.eye);
     motorPanel = new MotorPanel($('motor-rows'), msg.motorRows);
     raster = new RasterPanel($('raster-canvas'), msg.keyRows, neurons.meta.classes);

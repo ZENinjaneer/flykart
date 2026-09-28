@@ -70,6 +70,14 @@ first if `git` is missing: `xcode-select --install`.
 | **Training wheels** slider | Blends in an autopilot. At 0% (the default) the fly drives alone. |
 | **stress ×** menu (brain panel) | Draws up to 25 copies of the brain (4.1 million points) to see how Three.js copes. Watch the Performance panel. |
 
+## Add your own 3D models
+
+Put `.glb` files in `web/assets/models/` and list them in `models.json` there.
+Each model can replace the kart, the truck, the obstacles or the sugar cubes, or
+be placed as scenery, and gets a credit line in the kart view. The format is in
+[web/assets/models/README.md](web/assets/models/README.md). Only add artwork you
+have the rights to share.
+
 ## Commands
 
 | Command | What it does |
@@ -169,7 +177,9 @@ web/
   js/brainView.js   3D neuron cloud (Three.js points, glow shader, bloom)
   js/kartView.js    3D kart scene
   js/dashboard.js   eyes, motor, raster and performance panels
+  js/models.js      loads optional artist models (.glb) from assets/models
   js/main.js        connects the page to the simulation
+  assets/models/    drop-in 3D models + models.json manifest
   vendor/three/     Three.js r186 (MIT license), so you don't need Node.js
 ```
 
