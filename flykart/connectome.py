@@ -65,7 +65,7 @@ def download(force: bool = False) -> None:
         url = f"{BASE_URL}/{name}"
         tmp = dest.with_suffix(".part")
         print(f"downloading {name}")
-        with urllib.request.urlopen(url) as r, open(tmp, "wb") as f:
+        with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as f:
             total = int(r.headers.get("Content-Length", 0))
             done = 0
             while chunk := r.read(1 << 20):
