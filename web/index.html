@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FlyKart</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪰</text></svg>" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three/build/three.module.js",
+        "three/addons/": "/vendor/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🪰</span>
+      <span class="title">FlyKart</span>
+      <span class="subtitle" id="subtitle">loading connectome…</span>
+    </div>
+    <div class="controls">
+      <button id="btn-run" class="primary">▶ Run</button>
+      <button id="btn-reset">↺ Reset</button>
+      <label class="select">Mode
+        <select id="sel-mode">
+          <option value="chase">Chase the sugar truck</option>
+          <option value="free">Free roam (no truck)</option>
+        </select>
+      </label>
+      <label class="slider" title="Forward drive: Poisson input to the fly's forward-walking neurons (oDN1)">Drive
+        <input id="rng-drive" type="range" min="0" max="100" value="60" /><output id="out-drive">60</output>
+      </label>
+      <label class="slider" title="Blend in a simple autopilot. 0 = the fly steers alone.">Training wheels
+        <input id="rng-assist" type="range" min="0" max="100" value="0" /><output id="out-assist">0%</output>
+      </label>
+      <label class="select">Sim speed
+        <select id="sel-speed">
+          <option value="0.25">0.25×</option>
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1× real time</option>
+          <option value="0">max</option>
+        </select>
+      </label>
+      <span id="conn" class="conn off">offline</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel kart">
+      <div class="panel-title">Kart <span class="hint">the fly's brain is driving</span></div>
+      <canvas id="kart-canvas"></canvas>
+      <div class="hud">
+        <div class="speedo" title="fly-scale km/h"><span id="hud-speed">0</span><small>km/h</small></div>
+        <div class="wheel-wrap"><div id="hud-wheel" class="wheel">⎈</div></div>
+        <div class="score">
+          <div>🍬 <span id="hud-sugar">0</span></div>
+          <div>🦘 <span id="hud-cleared">0</span></div>
+          <div>💥 <span id="hud-crash">0</span></div>
+          <div>🏁 <span id="hud-laps">0.00</span></div>
+        </div>
+        <div id="hud-flash" class="flash"></div>
+      </div>
+      <div class="cam-buttons">
+        <button data-cam="chase" class="on">Chase</button>
+        <button data-cam="top">Top</button>
+        <button data-cam="orbit">Orbit</button>
+      </div>
+    </section>
+
+    <section class="panel brain">
+      <div class="panel-title">Brain <span class="hint" id="brain-hint">drag to rotate · scroll to zoom · click a neuron to poke its type</span></div>
+      <canvas id="brain-canvas"></canvas>
+      <div id="labels" class="labels"></div>
+      <div id="tooltip" class="tooltip hidden"></div>
+      <div class="legend" id="legend"></div>
+      <div class="brain-tools">
+        <label><input type="checkbox" id="chk-rotate" checked /> auto-rotate</label>
+        <label>bloom <input type="range" id="rng-bloom" min="0" max="300" value="80" /></label>
+        <label>point size <input type="range" id="rng-size" min="20" max="300" value="100" /></label>
+        <label title="Draw extra copies of the brain to stress-test Three.js">stress ×
+          <select id="sel-clones">
+            <option value="1">1</option><option value="4">4</option><option value="9">9</option>
+            <option value="16">16</option><option value="25">25</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel eye">
+      <div class="panel-title">Fly eyes <span class="hint">what the kart's fly sees</span></div>
+      <canvas id="eye-canvas"></canvas>
+      <div class="eye-channels">
+        <div class="chan"><span>LC10a pursuit</span><div class="lr"><i id="ch-target-l"></i><i id="ch-target-r"></i></div></div>
+        <div class="chan"><span>LC4/LPLC2 looming</span><div class="lr"><i id="ch-loom-l"></i><i id="ch-loom-r"></i></div></div>
+        <div class="chan"><span>Sugar taste</span><div class="lr single"><i id="ch-sugar"></i></div></div>
+      </div>
+    </section>
+
+    <section class="panel motor">
+      <div class="panel-title">Descending neurons → kart <span class="hint">spikes/s</span></div>
+      <div id="motor-rows" class="motor-rows"></div>
+    </section>
+
+    <section class="panel raster">
+      <div class="panel-title">Spike raster <span class="hint">key neurons + whole-CNS activity by class</span></div>
+      <canvas id="raster-canvas"></canvas>
+    </section>
+
+    <section class="panel perf">
+      <div class="panel-title">Performance</div>
+      <div class="perf-grid" id="perf-grid"></div>
+      <canvas id="perf-canvas"></canvas>
+    </section>
+
+    <section class="panel pokes">
+      <div class="panel-title">Poke the brain <span class="hint">0.4 s of 150 Hz Poisson input</span></div>
+      <div id="poke-buttons" class="poke-buttons"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

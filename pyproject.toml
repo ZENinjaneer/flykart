@@ -1,0 +1,32 @@
+[project]
+name = "flykart"
+version = "0.1.0"
+description = "A real fruit-fly connectome (MaleCNS v1.0) drives a kart; a Three.js dashboard shows its neurons firing."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "aiohttp>=3.10",
+    "torch>=2.8",
+]
+
+[project.scripts]
+flykart = "flykart.cli:main"
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["flykart"]
