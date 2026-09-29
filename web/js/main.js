@@ -2,6 +2,7 @@ import { BrainView } from './brainView.js';
 import { KartView } from './kartView.js';
 import { EyePanel, MotorPanel, RasterPanel, PerfPanel } from './dashboard.js';
 import { loadModels } from './models.js';
+import { ArrivalCadence } from './presentation.js';
 
 const $ = (id) => document.getElementById(id);
 const decoder = new TextDecoder();
@@ -19,6 +20,12 @@ let running = false;
 let lastEvents = null;
 let lastEye = null;
 let flashTimer = 0;
+let simTime = 0;
+let simRate = 0;
+let connected = false;
+let epoch = null;
+let lastBrainTime = null;
+const cadence = new ArrivalCadence();
 
 const net = { msgs: 0, bytes: 0 };
 const frameStats = { n: 0, cpu: 0, upload: 0, t0: performance.now() };
@@ -42,9 +49,17 @@ function send(obj) {
 }
 
 function setConn(on) {
+  connected = on;
   const el = $('conn');
   el.textContent = on ? 'live' : 'offline';
   el.className = `conn ${on ? 'on' : 'off'}`;
+  $('btn-run').disabled = !on;
+  $('btn-reset').disabled = !on;
+  if (!on) {
+    setRunning(false);
+    cadence.reset();
+  }
+  updateKartStatus();
 }
 
 function connect() {
@@ -87,6 +102,8 @@ function onInit(msg) {
     buildPokes(msg.pokes);
     requestAnimationFrame(loop);
   }
+  clearPresentation();
+  epoch = null;
   const m = msg.meta;
   $('subtitle').textContent =
     `${m.dataset} · ${m.neurons.toLocaleString()} neurons · ${(m.connections / 1e6).toFixed(1)}M connections · ` +
@@ -96,33 +113,83 @@ function onInit(msg) {
 }
 
 function onStatus(st) {
-  running = st.running;
-  $('btn-run').textContent = running ? '❚❚ Pause' : '▶ Run';
+  if (!acceptEpoch(st.epoch)) return;
+  setRunning(st.running);
   $('sel-mode').value = st.mode;
   $('rng-drive').value = Math.round(st.settings.drive * 100);
   $('out-drive').textContent = Math.round(st.settings.drive * 100);
   $('rng-assist').value = Math.round(st.settings.assist * 100);
   $('out-assist').textContent = `${Math.round(st.settings.assist * 100)}%`;
   $('sel-speed').value = String(st.settings.speed);
+  updateKartStatus();
+}
+
+function setRunning(on) {
+  if (running !== on) cadence.reset();
+  running = on;
+  kart?.setRunning(on);
+  $('btn-run').textContent = running ? '❚❚ Pause' : '▶ Run';
+}
+
+function clearPresentation() {
+  brain.resetActivity();
+  kart?.reset();
+  raster?.reset();
+  cadence.reset();
+  lastBrainTime = null;
+  lastEvents = null;
+  lastEye = null;
+  simTime = 0;
+  simRate = 0;
+  clearTimeout(flashTimer);
+  $('hud-flash').classList.remove('show');
+}
+
+function acceptEpoch(next) {
+  if (next === undefined) return true;
+  if (epoch !== null && next < epoch) return false;
+  if (epoch !== next) clearPresentation();
+  epoch = next;
+  return true;
+}
+
+function updateKartStatus() {
+  if (!connected) {
+    $('kart-status').textContent = `Offline · ${simTime.toFixed(2)} s elapsed · reconnecting…`;
+    return;
+  }
+  $('kart-status').textContent = running
+    ? `Running · ${simTime.toFixed(2)} s elapsed · ${simRate.toFixed(2)}× real time`
+    : `Paused · ${simTime.toFixed(2)} s elapsed · press Run to drive`;
 }
 
 function onFrame(buf) {
   const dv = new DataView(buf);
   const jlen = dv.getUint32(0, true);
   const f = JSON.parse(decoder.decode(new Uint8Array(buf, 4, jlen)));
+  if (!acceptEpoch(f.epoch)) return;
+  if (f.world.t < simTime) clearPresentation();
+  if (typeof f.running === 'boolean') setRunning(f.running);
+  simTime = f.world.t;
+  simRate = f.perf.rtf;
+  updateKartStatus();
   let off = (4 + jlen + 3) & ~3;
   const idx = new Uint32Array(buf, off, f.nSpk);
   const now = performance.now() / 1000;
-  brain.addSpikes(idx, now);
-  if (f.pokeFlash) brain.flash(f.pokeFlash, now);
+  const advancedMs = f.frameMs ?? (lastBrainTime === null
+    ? (f.tMs > 0 ? init.meta.frameMs : 0) : Math.max(0, f.tMs - lastBrainTime));
+  lastBrainTime = f.tMs;
+  const duration = advancedMs > 0 ? cadence.observe(now) : cadence.interval;
+  if (advancedMs > 0) brain.addSpikes(idx, now, advancedMs / 1000, duration);
 
-  kart.update(f.world);
+  kart.update(f.world, now, duration);
   motorPanel.update(f.motor);
-  raster.push(f.keySpikes, f.classCounts);
+  if (advancedMs > 0) raster.push(f.keySpikes, f.classCounts);
   lastEye = f.eye || lastEye;
   updateSenses(f.senses);
   updateHud(f.world, now);
   perf.set('rtf', `${f.perf.rtf.toFixed(2)}×`);
+  perf.set('time', `${f.world.t.toFixed(2)} s`);
   perf.set('gpu', f.perf.brainMs.toFixed(1));
   perf.set('spk', Math.round(f.perf.spikesPerSec).toLocaleString());
 }
@@ -204,6 +271,7 @@ function wireControls() {
   };
   $('sel-speed').onchange = (e) => send({ cmd: 'set', key: 'speed', value: parseFloat(e.target.value) });
   $('chk-rotate').onchange = (e) => brain.setAutoRotate(e.target.checked);
+  $('chk-raw-spikes').onchange = (e) => brain.setRawSpikes(e.target.checked);
   $('rng-bloom').oninput = (e) => brain.setBloom(e.target.value / 100);
   $('rng-size').oninput = (e) => brain.setPointSize(e.target.value / 100);
   $('sel-clones').onchange = (e) => brain.setClones(parseInt(e.target.value, 10));
@@ -244,7 +312,6 @@ function wireControls() {
 }
 
 let lastT = performance.now() / 1000;
-let rasterTick = 0;
 function loop() {
   const t0 = performance.now();
   const now = t0 / 1000;
@@ -254,7 +321,8 @@ function loop() {
   const ki = kart.render(dt, now);
   const kartCalls = ki.calls;
   const bi = brain.render(now);
-  if ((rasterTick++ & 1) === 0) { raster.draw(); eyePanel.draw(lastEye); }
+  raster.draw();
+  eyePanel.draw(lastEye);
 
   frameStats.n++;
   frameStats.cpu += performance.now() - t0;
@@ -284,6 +352,7 @@ async function main() {
     throw err;
   }
   brain = new BrainView($('brain-canvas'), $('brain-canvas').parentElement, neurons);
+  setConn(false);
   buildLegend();
   wireControls();
   connect();

@@ -11,17 +11,44 @@ dependencies = [
     "pyarrow>=17",
     "aiohttp>=3.10",
     "torch>=2.8",
+    "numba>=0.64",
 ]
+
+[project.optional-dependencies]
+cpu = ["torch>=2.8"]
+
+[dependency-groups]
+cuda = ["torch>=2.8"]
+
+# Preserve the original CUDA install; CPU users select --no-group cuda --extra cpu.
+[tool.uv]
+default-groups = ["cuda"]
+conflicts = [[{ group = "cuda" }, { extra = "cpu" }]]
 
 [project.scripts]
 flykart = "flykart.cli:main"
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu130", group = "cuda", marker = "sys_platform == 'linux'" },
+    # Keep the CUDA/CPU index choices confined to Linux in both resolver branches.
+    { index = "pypi", marker = "sys_platform != 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
 explicit = true
 
 [build-system]

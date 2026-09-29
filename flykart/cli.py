@@ -27,7 +27,8 @@ def cmd_serve(args) -> None:
         print("First run: downloading and preparing the connectome (~1.2 GB, a few minutes).\n")
         prepare()
         print()
-    serve(host=args.host, port=args.port, device=args.device, open_browser=not args.no_browser)
+    serve(host=args.host, port=args.port, device=args.device, open_browser=not args.no_browser,
+          cpu_rng=args.cpu_rng)
 
 
 def cmd_doctor(_args) -> None:
@@ -60,15 +61,21 @@ def cmd_doctor(_args) -> None:
         if torch.cuda.is_available():
             row("GPU", True, f"{torch.cuda.get_device_name(0)} (CUDA {torch.version.cuda})")
         else:
-            fix = ("install the NVIDIA driver on *Windows* (not inside WSL), then restart WSL"
-                   if wsl else "an NVIDIA GPU + driver makes the brain run in real time")
-            row("GPU", False, "none visible to PyTorch: the brain will run on CPU, in slow motion", fix)
+            row("GPU", None, "CUDA unavailable; using the compiled CPU backend")
         try:
-            import triton
+            import numba
 
-            row("Triton", True, f"{triton.__version__} (fast GPU kernels)")
+            row("CPU compiler", True, f"Numba {numba.__version__} (native neuron kernels)")
         except ImportError:
-            row("Triton", None, "not installed: using the slower pure-PyTorch path")
+            row("CPU compiler", False, "Numba is not installed",
+                "run ./setup.sh --cpu" if torch.version.cuda is None else "run ./setup.sh")
+        if torch.cuda.is_available():
+            try:
+                import triton
+
+                row("Triton", True, f"{triton.__version__} (fast GPU kernels)")
+            except ImportError:
+                row("Triton", None, "not installed: using PyTorch GPU operations")
     except ImportError:
         row("PyTorch", False, "not installed", "run ./setup.sh (or: uv sync)")
     three = ROOT / "web" / "vendor" / "three"
@@ -82,14 +89,14 @@ def cmd_doctor(_args) -> None:
         size = sum(f.stat().st_size for f in PROCESSED.glob("*")) / 1e6
         row("Connectome", True, f"{n:,} neurons ready ({size:.0f} MB in data/processed)")
     else:
-        row("Connectome", False, "not downloaded yet", "uv run flykart prepare  (or just: uv run flykart)")
+        row("Connectome", False, "not downloaded yet", "uv run --no-sync flykart prepare  (or just: uv run --no-sync flykart)")
     free = shutil.disk_usage(ROOT).free / 1e9
     row("Disk", free > 3 or is_prepared(), f"{free:.0f} GB free", "the download needs ~1.5 GB free")
     print()
     if problems:
-        print(f"{problems} problem(s) above. Fix them, then run:  uv run flykart")
+        print(f"{problems} problem(s) above. Fix them, then run:  uv run --no-sync flykart")
     else:
-        print("All good. Start FlyKart with:  uv run flykart")
+        print("All good. Start FlyKart with:  uv run --no-sync flykart")
 
 
 def cmd_bench(args) -> None:
@@ -100,10 +107,10 @@ def cmd_bench(args) -> None:
     from .connectome import Connectome
 
     conn = Connectome.load()
-    b = Brain(conn.indptr, conn.indices, conn.weights, conn.n, device=args.device)
+    b = Brain(conn.indptr, conn.indices, conn.weights, conn.n, device=args.device, cpu_rng=args.cpu_rng)
     name = torch.cuda.get_device_name(b.device) if b.device.type == "cuda" else "CPU"
-    print(f"{conn.dataset}: {conn.n:,} neurons, {conn.n_connections:,} connections on {name}"
-          f" ({'Triton' if b.use_triton else 'PyTorch'})")
+    backend = "Numba" if b.device.type == "cpu" else ("Triton" if b.use_triton else "PyTorch")
+    print(f"{conn.dataset}: {conn.n:,} neurons, {conn.n_connections:,} connections on {name} ({backend})")
     photo = np.flatnonzero(conn.neurons.type.str.match(r"^R[1-8]").to_numpy())
     for label, rate_hz in (("silent", 0.0), ("photoreceptors at 60 Hz", 60.0)):
         r = torch.zeros(conn.n)
@@ -125,7 +132,7 @@ def cmd_drive(args) -> None:
     from .server import BLOCKS_PER_FRAME, Sim
     from .connectome import Connectome
 
-    sim = Sim(Connectome.load(), device=args.device)
+    sim = Sim(Connectome.load(), device=args.device, cpu_rng=args.cpu_rng)
     sim.world.mode = args.mode
     sim._reset()
     sim.settings.update(drive=args.drive, assist=args.assist)
@@ -168,6 +175,12 @@ def _serve_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--device", default=None, help="cuda / cpu (default: cuda if available)")
     p.add_argument("--no-browser", action="store_true", help="don't try to open a browser")
+    _cpu_rng_arg(p)
+
+
+def _cpu_rng_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--cpu-rng", choices=("sparse", "full"), default="sparse",
+                   help="CPU random input: sparse draws only for stimulated neurons; full preserves the original draw sequence")
 
 
 def main() -> None:
@@ -186,6 +199,7 @@ def main() -> None:
     b = sub.add_parser("bench", help="measure brain simulation speed")
     b.add_argument("--ms", type=float, default=2000.0)
     b.add_argument("--device", default=None)
+    _cpu_rng_arg(b)
     b.set_defaults(fn=cmd_bench)
     d = sub.add_parser("drive", help="drive headless and report")
     d.add_argument("--seconds", type=float, default=60.0)
@@ -193,6 +207,7 @@ def main() -> None:
     d.add_argument("--drive", type=float, default=0.6)
     d.add_argument("--assist", type=float, default=0.0)
     d.add_argument("--device", default=None)
+    _cpu_rng_arg(d)
     d.add_argument("--sigma", type=float, default=None, help="LC10a receptive field width (deg)")
     d.add_argument("--peak", type=float, default=None, help="LC10a peak stimulation rate (Hz)")
     d.add_argument("--steer-hz", type=float, default=None, help="DNa02 L-R difference for full lock (Hz)")

@@ -1,7 +1,7 @@
 // The connectome as a point cloud: one point per neuron at its soma (or a
 // representative point for neurons whose soma is outside the imaged volume).
-// Each point stores the time of its last spike; the shader turns that into a
-// glow that decays, so per frame we only touch the neurons that just fired.
+// Activity updates on simulation packets; the shader smooths it between them.
+// Raw batch flashes remain available as a separate display mode.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -9,6 +9,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { RecentActivity } from './presentation.js';
 
 // Thousands of overlapping additive points can sum far above 1; squash that
 // smoothly before bloom so a busy optic lobe glows instead of whiting out.
@@ -22,9 +23,14 @@ const CompressShader = {
 const VERT = /* glsl */ `
   attribute float aClass;
   attribute float aLast;
+  attribute float aFrom;
+  attribute float aActivity;
   attribute float aKey;
   uniform float uTime;
   uniform float uDecay;
+  uniform float uStart;
+  uniform float uDuration;
+  uniform bool uRaw;
   uniform float uSize;
   uniform float uScale;
   uniform float uDim;
@@ -34,7 +40,10 @@ const VERT = /* glsl */ `
   varying vec3 vColor;
   varying float vAlpha;
   void main() {
-    float act = exp(-max(uTime - aLast, 0.0) / uDecay);
+    float p = clamp((uTime - uStart) / uDuration, 0.0, 1.0);
+    float stale = exp(-max(uTime - uStart - uDuration, 0.0) / (2.0 * uDuration));
+    float act = uRaw ? exp(-max(uTime - aLast, 0.0) / uDecay)
+                    : mix(aFrom, aActivity, p) * stale;
     vec3 base = uColors[int(aClass + 0.5)];
     vec3 lit = mix(base, uHot, 0.35) * (uGain + 2.0 * aKey);
     vColor = mix(base * uDim * (1.0 + 4.0 * aKey), lit, act);
@@ -87,10 +96,15 @@ export class BrainView {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(neurons.pos, 3));
     g.setAttribute('aClass', new THREE.BufferAttribute(Float32Array.from(neurons.cls), 1));
-    this.last = new Float32Array(this.n).fill(-1e4);
+    this.activity = new RecentActivity(this.n);
+    this.last = this.activity.lastSpike;
     this.lastAttr = new THREE.BufferAttribute(this.last, 1);
     this.lastAttr.setUsage(THREE.DynamicDrawUsage);
     g.setAttribute('aLast', this.lastAttr);
+    this.fromAttr = new THREE.BufferAttribute(this.activity.from, 1).setUsage(THREE.DynamicDrawUsage);
+    this.activityAttr = new THREE.BufferAttribute(this.activity.target, 1).setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('aFrom', this.fromAttr);
+    g.setAttribute('aActivity', this.activityAttr);
     this.key = new Float32Array(this.n);
     this.keyAttr = new THREE.BufferAttribute(this.key, 1);
     g.setAttribute('aKey', this.keyAttr);
@@ -103,6 +117,9 @@ export class BrainView {
       uniforms: {
         uTime: { value: 0 },
         uDecay: { value: 0.22 },
+        uStart: { value: 0 },
+        uDuration: { value: 0.15 },
+        uRaw: { value: false },
         uSize: { value: 0.012 },
         uScale: { value: 400 },
         uDim: { value: 0.05 },
@@ -172,18 +189,24 @@ export class BrainView {
   }
 
   // Called once per simulation frame with the neurons that spiked.
-  addSpikes(idx, now) {
-    const last = this.last;
-    for (let k = 0; k < idx.length; k++) last[idx[k]] = now;
-    if (idx.length) this._dirty = true;
+  addSpikes(idx, now, simSeconds, duration) {
+    this.activity.update(idx, now, simSeconds, duration);
+    this.material.uniforms.uStart.value = this.activity.start;
+    this.material.uniforms.uDuration.value = this.activity.duration;
+    this._dirty = true;
+    const fired = new Set(idx);
     for (const lab of this.labels) {
-      for (const i of lab.indices) if (last[i] === now) { lab.hotUntil = now + 0.25; break; }
+      for (const i of lab.indices) if (fired.has(i)) { lab.hotUntil = now + duration; break; }
     }
   }
 
-  // Replay an arbitrary set of neurons as "spiking" (used for poke feedback).
-  flash(indices, now) { this.addSpikes(indices, now); }
+  resetActivity() {
+    this.activity.reset();
+    this._dirty = true;
+    for (const lab of this.labels) lab.hotUntil = 0;
+  }
 
+  setRawSpikes(on) { this.material.uniforms.uRaw.value = on; }
   setBloom(v) { this.bloom.strength = v; }
   setPointSize(v) { this.material.uniforms.uSize.value = 0.012 * v; }
   setAutoRotate(on) { this.controls.autoRotate = on; }
@@ -228,7 +251,9 @@ export class BrainView {
     this.material.uniforms.uTime.value = now;
     if (this._dirty) {
       this.lastAttr.needsUpdate = true;
-      this.uploadBytes = this.last.byteLength;
+      this.fromAttr.needsUpdate = true;
+      this.activityAttr.needsUpdate = true;
+      this.uploadBytes = this.last.byteLength + this.activity.from.byteLength + this.activity.target.byteLength;
       this._dirty = false;
     } else {
       this.uploadBytes = 0;

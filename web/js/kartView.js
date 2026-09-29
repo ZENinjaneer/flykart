@@ -1,8 +1,9 @@
 // The kart world in Three.js. The server owns the physics; this file only
-// draws the latest state and eases toward it between frames.
+// interpolates between received states, stopping when the latest is reached.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { instance } from './models.js';
+import { interpolatePose, progress } from './presentation.js';
 
 // Server coordinates are (x, y) on the ground with heading counter-clockwise
 // from +x. In Three.js y is up, so world (x, y) -> (x, 0, -y) and a model
@@ -207,8 +208,11 @@ export class KartView {
     this.sugarModel = null;
     this.mixers = [];
     this.state = null;
-    this.disp = { x: 0, y: 0, h: 0, z: 0 };
+    this.disp = { x: 0, y: 0, h: 0, z: 0, t: 0 };
     this.lead = { x: 0, y: 0, h: 0 };
+    this.running = false;
+    this.transition = null;
+    this.lastRendered = null;
     this.wheelSpin = 0;
     this._resize();
     new ResizeObserver(() => this._resize()).observe(container);
@@ -336,7 +340,43 @@ export class KartView {
     return credits;
   }
 
-  update(state) {
+  setRunning(on) {
+    this.running = on;
+    if (!on && this.transition) {
+      this._sample(this.transition.start + this.transition.duration);
+      this.transition.duration = 0;
+    }
+  }
+
+  reset() {
+    this.state = null;
+    this.transition = null;
+    this.wheelSpin = 0;
+    this.lastRendered = null;
+  }
+
+  _sample(now) {
+    if (!this.transition) return;
+    const tr = this.transition;
+    const a = progress(now, tr.start, tr.duration);
+    this.disp = interpolatePose(tr.from, tr.to, a);
+    if (tr.leadTo) this.lead = interpolatePose(tr.leadFrom, tr.leadTo, a);
+  }
+
+  update(state, now, duration) {
+    this._sample(now);
+    if (!this.state || state.t !== this.state.t) {
+      const snap = !this.state || !this.running || state.t < this.state.t ||
+        Math.hypot(state.kart.x - this.disp.x, state.kart.y - this.disp.y) > 15;
+      const to = { ...state.kart, t: state.t };
+      this.transition = {
+        from: snap ? to : { ...this.disp }, to,
+        leadFrom: snap || !this.state?.lead ? state.lead : { ...this.lead },
+        leadTo: state.lead,
+        start: now, duration: snap ? 0 : duration,
+      };
+      this._sample(now);
+    }
     this.state = state;
     // Obstacles
     for (const o of state.obstacles) {
@@ -371,41 +411,33 @@ export class KartView {
   }
 
   render(dt, now) {
-    for (const m of this.mixers) m.update(dt);
+    const before = this.lastRendered || { ...this.disp };
+    if (this.running) this._sample(now);
+    const simDt = this.running ? Math.max(0, this.disp.t - before.t) : 0;
+    for (const m of this.mixers) m.update(simDt);
     const s = this.state;
     if (s) {
       const k = s.kart;
-      const a = 1 - Math.exp(-dt / 0.045);
-      let dh = k.h - this.disp.h;
-      dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-      if (Math.hypot(k.x - this.disp.x, k.y - this.disp.y) > 15) { this.disp.x = k.x; this.disp.y = k.y; }
-      this.disp.x += (k.x - this.disp.x) * a;
-      this.disp.y += (k.y - this.disp.y) * a;
-      this.disp.h += dh * a;
-      this.disp.z += (k.z - this.disp.z) * a;
       this.kart.position.copy(toVec(this.disp.x, this.disp.y, this.disp.z));
-      this.kart.rotation.set(0, this.disp.h, k.z > 0.05 ? 0.15 : 0);
-      this.wheelSpin -= k.v * dt / 0.38;
+      this.kart.rotation.set(0, this.disp.h, this.disp.z > 0.05 ? 0.15 : 0);
+      if (simDt > 0) {
+        const distance = Math.hypot(this.disp.x - before.x, this.disp.y - before.y);
+        this.wheelSpin -= Math.sign(k.v) * distance / 0.38;
+      }
       this.wheels.forEach((w, i) => {
         w.rotation.z = this.wheelSpin;
         w.rotation.y = i < 2 ? -k.steer * 0.5 : 0;
       });
-      const flap = Math.min(1, Math.abs(k.v) / 10) * Math.sin(now * 40) * 0.25;
+      const flap = Math.min(1, Math.abs(k.v) / 10) * Math.sin(this.disp.t * 40) * 0.25;
       this.wings.forEach((w, i) => { w.rotation.z = (i ? 0.35 : -0.35) + flap * (i ? 1 : -1); });
       this.proboscis.scale.y = 0.25 + 0.9 * k.feed;
       if (s.lead) {
-        let lh = s.lead.h - this.lead.h;
-        lh = Math.atan2(Math.sin(lh), Math.cos(lh));
-        if (Math.hypot(s.lead.x - this.lead.x, s.lead.y - this.lead.y) > 15) { this.lead.x = s.lead.x; this.lead.y = s.lead.y; }
-        this.lead.x += (s.lead.x - this.lead.x) * a;
-        this.lead.y += (s.lead.y - this.lead.y) * a;
-        this.lead.h += lh * a;
         this.truck.position.copy(toVec(this.lead.x, this.lead.y));
         this.truck.rotation.y = this.lead.h;
       }
       for (const e of this.sugars.values()) {
-        if (this.sugarModel) e.rotation.y = now * 1.1;
-        else e.rotation.set(now * 0.7, now * 1.1, 0);
+        if (this.sugarModel) e.rotation.y = this.disp.t * 1.1;
+        else e.rotation.set(this.disp.t * 0.7, this.disp.t * 1.1, 0);
       }
 
       // Keep the shadow camera on the kart.
@@ -426,6 +458,7 @@ export class KartView {
         this.orbit.update();
       }
     }
+    this.lastRendered = { ...this.disp };
     this.renderer.render(this.scene, this.camera);
     return this.renderer.info.render;
   }

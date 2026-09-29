@@ -270,7 +270,7 @@ class Connectome:
     def load(cls, w_syn: float = 0.275) -> "Connectome":
         f = PROCESSED / "connectome.npz"
         if not f.exists():
-            raise SystemExit("No processed connectome yet. Run:  uv run flykart prepare")
+            raise SystemExit("No processed connectome yet. Run:  uv run --no-sync flykart prepare")
         z = np.load(f)
         neurons = pd.read_parquet(PROCESSED / "neurons.parquet")
         counts = z["counts"].astype(np.int32)

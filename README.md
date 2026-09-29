@@ -7,7 +7,7 @@
 In 2026, scientists at HHMI Janelia and Google finished mapping every neuron and
 every connection in the nervous system of a male fruit fly: 165,122 neurons, 25.6
 million connections, and 124 million synapses. FlyKart downloads that map, turns it
-into a spiking neural network on your graphics card, and connects it to a kart:
+into a spiking neural network on your CPU or GPU, and connects it to a kart:
 
 - **Its eyes see the game.** The kart's view stimulates the fly's real photoreceptors
   and visual neurons.
@@ -17,9 +17,10 @@ into a spiking neural network on your graphics card, and connects it to a kart:
 
 ## Quick start
 
-You need **git**, an **internet connection**, and about **8 GB of free disk space**.
-An **NVIDIA graphics card** makes the brain run in real time. Without one it still
-works, just in slow motion.
+You need **git**, an **internet connection**, and about **8 GB of free disk space**
+for the CUDA installation, or **3 GB** for CPU-only. NVIDIA GPUs use the existing
+CUDA/Triton backend. CPUs use **Numba-compiled native kernels** and generally run
+the brain in slow motion.
 
 ```bash
 git clone https://github.com/ZENinjaneer/flykart.git
@@ -28,17 +29,61 @@ cd flykart
 uv run flykart
 ```
 
+For a **CPU-only installation**, replace the last two commands with:
+
+```bash
+./setup.sh --cpu
+uv run --no-group cuda --extra cpu flykart
+```
+
+Keep `--no-group cuda --extra cpu` on subsequent `uv run` and `uv sync` commands to avoid
+installing CUDA packages. Plain `uv sync` / `uv run` retains the original
+CUDA-enabled PyTorch default on Linux; `--device cpu` only selects execution
+and does not change which packages are installed.
+
 Then open **http://localhost:8765** in your browser and press **▶ Run**.
 
 `./setup.sh` does everything for you:
 
 1. Installs [uv](https://docs.astral.sh/uv/), a Python package manager, if you don't have it.
-2. Installs the right Python version and all the libraries. This is a few GB the
-   first time, mostly PyTorch and CUDA.
+2. Installs the right Python version, the selected PyTorch build, and Numba.
+   Native CPU kernels compile on first use and are then cached.
 3. Downloads the fly connectome (~1.2 GB) and preprocesses it (~1 minute).
 4. Checks your setup and tells you how to fix anything that's wrong.
 
 It's safe to run again; finished steps are skipped.
+
+### CPU execution
+
+The CPU backend compiles Python numerical kernels to native machine code with
+Numba. It runs independent neuron updates in parallel, stores spikes as compact
+bitmasks, and partitions synaptic outputs so threads never write the same cell.
+It keeps the full connectome and the original 0.1 ms integration step.
+
+The default `--cpu-rng sparse` draws random stimulation only for neurons whose
+input rate is nonzero. This keeps the independent stimulation probabilities but
+changes trajectories for a given seed compared with the older full-array draws.
+Use `uv run --no-group cuda --extra cpu flykart --cpu-rng full` for the original CPU random sequence. Reset
+restarts the generator from its seed. Identical inputs reproduce the same neural
+trajectory within either mode; changing the number of CPU threads does not
+change that trajectory.
+
+`FLYKART_CPU_THREADS` controls the native worker count; for example,
+`FLYKART_CPU_THREADS=4 uv run --no-group cuda --extra cpu flykart`. More threads are not always faster.
+Run `uv run --no-group cuda --extra cpu flykart bench --ms 200` for a short measurement on your machine.
+
+On this Ryzen 5 220, four workers reduced warmed full-brain updates from
+753 ms to 90 ms in a paired benchmark (8.4× faster). The restarted server
+averaged 78 ms per 14.4 ms simulation update: about 0.185× real time, so a
+simulated second still takes about 5.4 wall-clock seconds. Workload and browser
+load affect these numbers; the short `bench` command measures an idle brain.
+See [CPU measurements and method](docs/cpu-performance.md) for details.
+
+Pause freezes the brain and kart, while an explicit stimulus can still exercise
+the brain while paused. Reset clears the model, clock, and random sequence.
+The kart panel shows actual simulation speed separately from the requested
+speed limit. The brain view defaults to smoothed activity; select spike flashes
+to inspect the individual update batches.
 
 ### On Windows
 
@@ -48,9 +93,10 @@ Use **WSL2** (Linux inside Windows):
 2. Open the **Ubuntu** app from the Start menu and create a user.
 3. Run the Quick start commands above in that Ubuntu window.
 
-If you have an NVIDIA card, install the normal NVIDIA driver on **Windows**, not inside
-Ubuntu. WSL2 picks it up automatically. Then open http://localhost:8765 in your Windows
-browser.
+Open http://localhost:8765 in your Windows browser. For NVIDIA execution, install
+the NVIDIA driver on Windows, not inside Ubuntu, and use the default setup.
+Use `./setup.sh --cpu` and `uv run --no-group cuda --extra cpu flykart` without an NVIDIA GPU;
+the CPU installation does not require a CUDA driver.
 
 ### On macOS
 
@@ -79,6 +125,8 @@ be placed as scenery, and gets a credit line in the kart view. The format is in
 have the rights to share.
 
 ## Commands
+
+For the CPU-only installation, insert `--no-group cuda --extra cpu` after `uv run` in the examples below.
 
 | Command | What it does |
 |---|---|
@@ -128,13 +176,15 @@ Some behaviors nobody programmed:
 
 ## Troubleshooting
 
-Run `uv run flykart doctor` first. It checks everything below.
+Run `uv run flykart doctor` first (`uv run --no-group cuda --extra cpu flykart doctor` for CPU-only).
+It checks everything below.
 
 - **`uv: command not found` right after setup:** open a new terminal, or run
   `source $HOME/.local/bin/env`.
-- **"none visible to PyTorch" / the kart moves in slow motion:** no NVIDIA GPU was
-  found, so the brain is running on the CPU. On WSL2, install or update the NVIDIA
-  driver on Windows, then run `wsl --shutdown` in PowerShell and reopen Ubuntu.
+- **The kart moves in slow motion:** check the actual simulation speed in the kart
+  panel and run `uv run flykart bench --ms 200`. The speed limit cannot make an
+  overloaded simulation run faster. CUDA being unavailable is expected with the
+  CPU-only installation.
 - **"Port 8765 is already in use":** FlyKart is probably already running in another
   terminal. Stop it with Ctrl+C, or use `uv run flykart --port 8766`.
 - **The page won't load from Windows (WSL2):** start with `uv run flykart --host 0.0.0.0`

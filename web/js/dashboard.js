@@ -14,10 +14,19 @@ export class EyePanel {
     this.az = dims.az;
     this.el = dims.el;
     this.ctx = canvas.getContext('2d');
+    this.eye = null;
+    this.dirty = true;
+    new ResizeObserver(() => { this.dirty = true; }).observe(canvas);
   }
 
   draw(eye) {
     if (!eye) return;
+    if (eye !== this.eye) {
+      if (!this.eye || eye.length !== this.eye.length || eye.some((v, i) => v !== this.eye[i])) this.dirty = true;
+      this.eye = eye;
+    }
+    if (!this.dirty) return;
+    this.dirty = false;
     const { w, h } = fitCanvas(this.canvas);
     const g = this.ctx;
     g.clearRect(0, 0, w, h);
@@ -104,14 +113,21 @@ export class RasterPanel {
     this.classes = classes;
     this.history = [];
     this.maxCols = 400;
+    this.dirty = true;
+    new ResizeObserver(() => { this.dirty = true; }).observe(canvas);
   }
 
   push(keyCounts, classCounts) {
     this.history.push({ key: keyCounts, cls: classCounts });
     if (this.history.length > this.maxCols) this.history.shift();
+    this.dirty = true;
   }
 
+  reset() { this.history = []; this.peak = 1; this.dirty = true; }
+
   draw() {
+    if (!this.dirty) return;
+    this.dirty = false;
     const { w, h, dpr } = fitCanvas(this.canvas);
     const g = this.ctx;
     g.clearRect(0, 0, w, h);
@@ -127,8 +143,8 @@ export class RasterPanel {
     g.font = `${Math.round(9 * dpr)}px ui-monospace, monospace`;
     g.textBaseline = 'middle';
     let start = 0;
-    for (let i = 1; i <= rows; i++) {
-      if (i === rows || this.keyRows[i].group !== this.keyRows[start].group) {
+    for (let i = 1; i <= this.keyRows.length; i++) {
+      if (i === this.keyRows.length || this.keyRows[i].group !== this.keyRows[start].group) {
         const y = ((start + i) / 2) * rh;
         g.fillStyle = this.keyRows[start].color;
         g.fillText(this.keyRows[start].group, 4 * dpr, y);
@@ -140,7 +156,7 @@ export class RasterPanel {
     for (let c = 0; c < cols; c++) {
       const col = this.history[c].key;
       const x = x0 + c * cw;
-      for (let r = 0; r < rows; r++) {
+      for (let r = 0; r < this.keyRows.length; r++) {
         const v = col[r];
         if (!v) continue;
         g.fillStyle = this.keyRows[r].color;
@@ -183,6 +199,7 @@ export class PerfPanel {
       ['fps', 'render fps'], ['frame', 'frame ms'], ['points', 'points drawn'],
       ['calls', 'draw calls'], ['upload', 'GPU upload/s'], ['ws', 'socket in'],
       ['rtf', 'sim speed'], ['gpu', 'brain ms/frame'], ['spk', 'spikes/s'],
+      ['time', 'simulation time'],
     ];
     gridEl.innerHTML = spec.map(([k, l]) => `<div><span>${l}</span><b id="perf-${k}">–</b></div>`).join('');
     for (const [k] of spec) this.fields[k] = document.getElementById(`perf-${k}`);

@@ -164,19 +164,26 @@ select { background: #0f1526; border: 1px solid rgba(124, 243, 255, 0.2); border
   padding: 5px 8px; border-radius: 6px; max-width: 260px;
 }
 .hidden { display: none; }
+.brain-footer {
+  position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 3;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end;
+  pointer-events: none;
+}
+.brain-footer > * { pointer-events: auto; }
 .legend {
-  position: absolute; left: 10px; bottom: 10px; z-index: 3;
-  display: grid; grid-template-columns: auto auto; gap: 2px 12px;
+  flex: 0 1 auto; max-width: 100%;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 12px;
   font-size: 11px; color: var(--muted);
   background: rgba(5, 7, 13, 0.5); padding: 6px 8px; border-radius: 8px;
 }
 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
 .brain-tools {
-  position: absolute; right: 10px; bottom: 10px; z-index: 3;
+  flex: 1 1 340px; min-width: 0;
   display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end;
   font-size: 11px; color: var(--muted);
   background: rgba(5, 7, 13, 0.5); padding: 5px 8px; border-radius: 8px;
 }
+.brain-tools label { white-space: nowrap; }
 .brain-tools input[type="range"] { width: 70px; accent-color: var(--accent2); }
 
 /* ---------- small panels ---------- */

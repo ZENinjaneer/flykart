@@ -37,7 +37,7 @@
       <label class="slider" title="Blend in a simple autopilot. 0 = the fly steers alone.">Training wheels
         <input id="rng-assist" type="range" min="0" max="100" value="0" /><output id="out-assist">0%</output>
       </label>
-      <label class="select">Sim speed
+      <label class="select" title="Requested maximum speed; actual speed depends on simulation performance">Speed limit
         <select id="sel-speed">
           <option value="0.25">0.25×</option>
           <option value="0.5">0.5×</option>
@@ -51,7 +51,7 @@
 
   <main class="grid">
     <section class="panel kart">
-      <div class="panel-title">Kart <span class="hint">the fly's brain is driving</span></div>
+      <div class="panel-title">Kart <span class="hint" id="kart-status">connecting…</span></div>
       <canvas id="kart-canvas"></canvas>
       <div class="hud">
         <div class="speedo" title="fly-scale km/h"><span id="hud-speed">0</span><small>km/h</small></div>
@@ -73,21 +73,24 @@
     </section>
 
     <section class="panel brain">
-      <div class="panel-title">Brain <span class="hint" id="brain-hint">drag to rotate · scroll to zoom · click a neuron to poke its type</span></div>
+      <div class="panel-title">Brain <span class="hint" id="brain-hint">recent activity · drag to rotate · click a neuron to poke its type</span></div>
       <canvas id="brain-canvas"></canvas>
       <div id="labels" class="labels"></div>
       <div id="tooltip" class="tooltip hidden"></div>
-      <div class="legend" id="legend"></div>
-      <div class="brain-tools">
-        <label><input type="checkbox" id="chk-rotate" checked /> auto-rotate</label>
-        <label>bloom <input type="range" id="rng-bloom" min="0" max="300" value="80" /></label>
-        <label>point size <input type="range" id="rng-size" min="20" max="300" value="100" /></label>
-        <label title="Draw extra copies of the brain to stress-test Three.js">stress ×
-          <select id="sel-clones">
-            <option value="1">1</option><option value="4">4</option><option value="9">9</option>
-            <option value="16">16</option><option value="25">25</option>
-          </select>
-        </label>
+      <div class="brain-footer">
+        <div class="legend" id="legend"></div>
+        <div class="brain-tools">
+          <label title="Show the neurons that fired in each received batch. By default, recent activity is smoothed between batches; neither view shows membrane voltage."><input type="checkbox" id="chk-raw-spikes" /> raw spike batches</label>
+          <label><input type="checkbox" id="chk-rotate" checked /> auto-rotate</label>
+          <label>bloom <input type="range" id="rng-bloom" min="0" max="300" value="80" /></label>
+          <label>point size <input type="range" id="rng-size" min="20" max="300" value="100" /></label>
+          <label title="Draw extra copies of the brain to stress-test Three.js">stress ×
+            <select id="sel-clones">
+              <option value="1">1</option><option value="4">4</option><option value="9">9</option>
+              <option value="16">16</option><option value="25">25</option>
+            </select>
+          </label>
+        </div>
       </div>
     </section>
 
@@ -118,7 +121,7 @@
     </section>
 
     <section class="panel pokes">
-      <div class="panel-title">Poke the brain <span class="hint">0.4 s of 150 Hz Poisson input</span></div>
+      <div class="panel-title">Poke the brain <span class="hint">0.4 simulated seconds of input</span></div>
       <div id="poke-buttons" class="poke-buttons"></div>
     </section>
   </main>
